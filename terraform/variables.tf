@@ -45,5 +45,9 @@ variable "user_max_count"   {
 
 variable "kubernetes_version" { 
     type = string
-    default = "1.30.4"
+    default = "1.31.11" 
     }
+variable "ssh_public_key" {
+  description = "Public SSH key for admin access"
+  type        = string
+}

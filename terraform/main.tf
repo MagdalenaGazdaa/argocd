@@ -42,7 +42,7 @@ resource "azurerm_kubernetes_cluster" "aks" {
   dns_prefix          = "${local.name}-api"
 
   kubernetes_version  = var.kubernetes_version
-  automatic_channel_upgrade = "stable" 
+  sku_tier = "Premium"
 
   identity {
     type = "SystemAssigned"
@@ -108,7 +108,7 @@ resource "azurerm_role_assignment" "acr_pull" {
 
 # bastion
 resource "azurerm_subnet" "bastion" {
-  name                 = "AzureBastionSubnet"
+  name                 = "${local.name}-bastion-snet"
   resource_group_name  = azurerm_resource_group.rg.name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = ["10.30.2.0/27"] # dostosuj, ale >= /27
@@ -120,14 +120,48 @@ resource "azurerm_public_ip" "bastion" {
   allocation_method   = "Static"
   sku                 = "Standard"
 }
-resource "azurerm_bastion_host" "bastion" {
+
+# Network interface dla VM
+resource "azurerm_network_interface" "bastion" {
+  name                = "${local.name}-bastion-nic"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.bastion.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.bastion.id
+  }
+}
+# Sama maszyna wirtualna
+resource "azurerm_linux_virtual_machine" "bastion" {
   name                = "${local.name}-bastion"
   resource_group_name = azurerm_resource_group.rg.name
   location            = azurerm_resource_group.rg.location
+  size                = "Standard_B1s"
+  admin_username      = "azureuser"
+  network_interface_ids = [azurerm_network_interface.bastion.id]
 
-  ip_configuration {
-    name                 = "configuration"
-    subnet_id            = azurerm_subnet.bastion.id
-    public_ip_address_id = azurerm_public_ip.bastion.id
+  admin_ssh_key {
+    username   = "azureuser"
+    public_key = var.ssh_public_key
+  }
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts"
+    version   = "latest"
+  }
+
+  tags = {
+    project = var.project
+    env     = var.env
   }
 }
