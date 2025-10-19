@@ -48,9 +48,4 @@ resource "azurerm_linux_virtual_machine" "bastion" {
   }
 
   disable_password_authentication = true
-
-  tags = {
-    project = var.project
-    env     = var.env
-  }
 }

@@ -10,12 +10,12 @@ variable "location"        {
 variable "project"         { 
     description = "Project name prefix"
     type = string  
-    default = "argo-demo" 
+    default = "argocd01" 
     }
 variable "env"             { 
     description = "Environment name"
     type = string  
-    default = "single" 
+    default = "demo" 
     }
 
 variable "vnet_cidr"   { 
@@ -32,10 +32,7 @@ variable "ssh_public_key" {
   description = "SSH public key"
   type        = string
 }
-#########
-
 variable "kubernetes_version" { 
     type = string
     default = "1.31.11" 
     }
-
