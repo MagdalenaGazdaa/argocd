@@ -1,53 +1,41 @@
-variable "subscription_id" { type = string }
+variable "subscription_id" { 
+    description = "Subscription ID"
+    type = string 
+    }
 variable "location"        { 
+    description = "Azure region"
     type = string  
     default = "northeurope" 
     }
 variable "project"         { 
+    description = "Project name prefix"
     type = string  
     default = "argo-demo" 
     }
 variable "env"             { 
+    description = "Environment name"
     type = string  
     default = "single" 
     }
 
 variable "vnet_cidr"   { 
+    description = "Address space for VNet"
     type = string 
     default = "10.30.0.0/16" 
     }
-variable "subnet_cidr" { 
+variable "bastion_subnet_cidr" { 
+    description = "CIDR for Bastion subnet"
     type = string 
     default = "10.30.1.0/24" 
     }
-
-variable "system_vm_size"   { 
-    type = string 
-    default = "Standard_D2as_v5" 
-    }
-variable "system_node_count"{ 
-    type = number 
-    default = 2 
-    }
-
-variable "user_vm_size"     { 
-    type = string 
-    default = "Standard_D2as_v5" 
-    }
-variable "user_min_count"   { 
-    type = number 
-    default = 1 
-    }
-variable "user_max_count"   { 
-    type = number 
-    default = 3 
-    }
+variable "ssh_public_key" {
+  description = "SSH public key"
+  type        = string
+}
+#########
 
 variable "kubernetes_version" { 
     type = string
     default = "1.31.11" 
     }
-variable "ssh_public_key" {
-  description = "Public SSH key for admin access"
-  type        = string
-}
+
