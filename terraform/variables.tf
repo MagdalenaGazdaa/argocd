@@ -43,3 +43,7 @@ variable "user_max_count"   {
     default = 3 
     }
 
+variable "kubernetes_version" { 
+    type = string
+    default = "1.30.4"
+    }

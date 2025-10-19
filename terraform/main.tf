@@ -41,7 +41,8 @@ resource "azurerm_kubernetes_cluster" "aks" {
   resource_group_name = azurerm_resource_group.rg.name
   dns_prefix          = "${local.name}-api"
 
-  kubernetes_version  = null
+  kubernetes_version  = var.kubernetes_version
+  automatic_channel_upgrade = "stable" 
 
   identity {
     type = "SystemAssigned"
@@ -54,7 +55,6 @@ resource "azurerm_kubernetes_cluster" "aks" {
     os_disk_size_gb     = 128
     type                = "VirtualMachineScaleSets"
     vnet_subnet_id      = azurerm_subnet.aks.id
-    temporary_name_for_rotation = "tmpnp1"
     node_labels = {
       "nodepool" = "system"
     }
@@ -106,3 +106,28 @@ resource "azurerm_role_assignment" "acr_pull" {
   depends_on           = [azurerm_kubernetes_cluster.aks]
 }
 
+# bastion
+resource "azurerm_subnet" "bastion" {
+  name                 = "AzureBastionSubnet"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.30.2.0/27"] # dostosuj, ale >= /27
+}
+resource "azurerm_public_ip" "bastion" {
+  name                = "${local.name}-bastion-pip"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+resource "azurerm_bastion_host" "bastion" {
+  name                = "${local.name}-bastion"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+
+  ip_configuration {
+    name                 = "configuration"
+    subnet_id            = azurerm_subnet.bastion.id
+    public_ip_address_id = azurerm_public_ip.bastion.id
+  }
+}
