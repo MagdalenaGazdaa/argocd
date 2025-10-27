@@ -1,0 +1,146 @@
+---
+- name: Install ArgoCD + RBAC + create test user
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    kubeconfig: "{{ lookup('env','HOME') + '/.kube/config' }}"
+    install_manifest: "../argocd//install/install-argocd.yaml"
+    rbac_manifest: "../argocd/rbac/argocd-rbac-cm.yaml"
+    namespace: "argocd"
+    test_user: "testuser"
+    test_password: "MojeTajneHaslo123!"
+    htpasswd_cmd: "/usr/bin/htpasswd"
+    restart_annotation_key: "kubectl.kubernetes.io/restartedAt"
+
+  tasks:
+    - name: Ensure python k8s client is installed (pip)
+      pip:
+        name: kubernetes
+        state: present
+      become: false
+
+    - name: Ensure apache2-utils (htpasswd) is available (Debian/Ubuntu)
+      apt:
+        name: apache2-utils
+        state: present
+        update_cache: yes
+      become: yes
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Ensure argocd namespace exists
+      k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ namespace | default('argocd') }}"
+            labels:
+              app.kubernetes.io/name: argocd
+
+    - name: Apply ArgoCD install manifest
+      k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        state: present
+        src: "{{ install_manifest }}"
+
+    - name: Wait for argocd namespace to exist
+      k8s_info:
+        kubeconfig: "{{ kubeconfig }}"
+        kind: Namespace
+        name: "{{ namespace }}"
+      register: ns_info
+      retries: 10
+      delay: 3
+      until: ns_info.resources | length > 0
+
+    - name: Apply RBAC ConfigMap (if file exists)
+      k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        state: present
+        src: "{{ rbac_manifest }}"
+      when: lookup('ansible.builtin.file', rbac_manifest, errors='ignore') is not none
+
+    - name: Ensure account entry in argocd-cm (activates local account login)
+      k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: argocd-cm
+            namespace: "{{ namespace }}"
+      register: ensure_argocd_cm
+
+    - name: Patch argocd-cm - add account.<user> login
+      community.kubernetes.k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        state: patched
+        kind: ConfigMap
+        namespace: "{{ namespace }}"
+        name: argocd-cm
+        merge_type: strategic-merge
+        definition:
+          data:
+            "accounts.{{ test_user }}": "login"
+
+    - name: Generate bcrypt hash for the password using htpasswd
+      shell: |
+        set -e
+        "{{ htpasswd_cmd }}" -nbBC 10 "" "{{ test_password }}" | tr -d ':\n' | sed 's/\$2y/\$2a/'
+      register: bcrypt_hash
+      changed_when: false
+
+    - name: Show debug bcrypt hash (first 8 chars)
+      debug:
+        msg: "bcrypt hash (prefix): {{ bcrypt_hash.stdout[:8] }}..."
+
+    - name: Patch argocd-secret with testuser.password (stringData used so k8s encodes)
+      community.kubernetes.k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        state: patched
+        kind: Secret
+        namespace: "{{ namespace }}"
+        name: argocd-secret
+        merge_type: strategic-merge
+        definition:
+          stringData:
+            "{{ test_user }}.password": "{{ bcrypt_hash.stdout }}"
+            "{{ test_user }}.passwordMtime": "{{ lookup('pipe','date -Iseconds') }}"
+
+    - name: Force restart argocd-server by adding restart annotation
+      community.kubernetes.k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        state: patched
+        kind: Deployment
+        namespace: "{{ namespace }}"
+        name: argocd-server
+        merge_type: strategic-merge
+        definition:
+          spec:
+            template:
+              metadata:
+                annotations:
+                  "{{ restart_annotation_key }}": "{{ lookup('pipe','date -Iseconds') }}"
+
+    - name: Wait until argocd-server deployment is available
+      community.kubernetes.k8s_info:
+        kubeconfig: "{{ kubeconfig }}"
+        kind: Deployment
+        namespace: "{{ namespace }}"
+        name: argocd-server
+      register: depl_info
+      retries: 30
+      delay: 5
+      until: (depl_info.resources[0].status.availableReplicas | default(0)) >= 1
+
+    - name: Print success message with login info
+      debug:
+        msg: |
+          ArgoCD should be installed and test account created.
+          UI access (if port-forward): http://localhost:8080 (use port-forward)
+          Test user: {{ test_user }}
+          Test password: {{ test_password }}
