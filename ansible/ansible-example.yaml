@@ -1,0 +1,10 @@
+- name: Create a simple file
+  hosts: bastion
+  gather_facts: false
+
+  tasks:
+    - name: Create /tmp/hello.txt with content
+      copy:
+        dest: /tmp/hello.txt
+        content: "Hello from Ansible!\n"
+        mode: '0644'
