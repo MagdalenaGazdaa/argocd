@@ -1,0 +1,144 @@
+- name: Ensure ArgoCD namespace exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    kind: Namespace
+    name: "{{ namespace }}"
+
+- name: Install ArgoCD (base manifests)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    src: "{{ role_path }}/files/install-argocd.yaml"
+    apply: true
+    namespace: "{{ namespace }}"
+
+- name: Wait for ArgoCD deployments
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ namespace }}"
+    name: "{{ item }}"
+    wait: true
+    wait_condition:
+      type: Available
+      status: "True"
+    wait_timeout: 600
+  loop:
+    - argocd-applicationset-controller
+    - argocd-dex-server
+    - argocd-notifications-controller
+    - argocd-redis
+    - argocd-repo-server
+    - argocd-server
+
+- name: Patch argocd-cm (merge only our keys)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: patched
+    api_version: v1
+    kind: ConfigMap
+    name: argocd-cm
+    namespace: "{{ namespace }}"
+    merge_type: merge
+    definition:
+      metadata:
+        name: argocd-cm
+        namespace: "{{ namespace }}"
+      data:
+        accounts.demo-deployer: "login"
+        accounts.readonly-user: "login"
+
+- name: Patch argocd-rbac-cm (merge policies)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: patched
+    api_version: v1
+    kind: ConfigMap
+    name: argocd-rbac-cm
+    namespace: "{{ namespace }}"
+    merge_type: merge
+    definition:
+      metadata:
+        name: argocd-rbac-cm
+        namespace: "{{ namespace }}"
+      data:
+        policy.default: "role:readonly"
+        policy.csv: |
+          p, role:readonly, applications, get, */*, allow
+          p, role:readonly, projects, get, */*, allow
+          p, role:readonly, repositories, get, */*, allow
+
+          p, role:deployer, applications, get, demo/*, allow
+          p, role:deployer, applications, sync, demo/*, allow
+          p, role:deployer, applications, update, demo/*, allow
+
+          g, demo-deployer, role:deployer
+
+# - name: Apply ArgoCD config (cm + rbac)
+#   kubernetes.core.k8s:
+#     kubeconfig: "{{ kubeconfig }}"
+#     state: present
+#     src: "{{ role_path }}/files/{{ item }}"
+#     apply: true
+#   loop:
+#     - argocd-cm.yaml
+#     - argocd-rbac-cm.yaml
+
+- name: Compute password mtime (UTC RFC3339)
+  set_fact:
+    argocd_password_mtime: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+- name: Generate bcrypt hashes (requires passlib/bcrypt installed locally)
+  set_fact:
+    argocd_admin_password_bcrypt: "{{ (argocd_admin_password | string) | password_hash('bcrypt') }}"
+    demo_deployer_password_bcrypt: "{{ (demo_deployer_password | string) | password_hash('bcrypt') }}"
+    readonly_user_password_bcrypt: "{{ (readonly_user_password | string) | password_hash('bcrypt') }}"
+
+- name: Patch argocd-secret with passwords (admin + local users)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    namespace: "{{ namespace }}"
+    definition: "{{ lookup('template', role_path + '/files/argocd-secret-patch.yaml.j2') | from_yaml }}"
+    apply: true
+
+- name: Ensure demo namespace exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    src: "{{ role_path }}/files/namespace-demo.yaml"
+    apply: true
+
+- name: Apply AppProject demo
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    namespace: "{{ namespace }}"
+    definition: "{{ lookup('template', role_path + '/files/appproject-demo.yaml.j2') | from_yaml }}"
+    apply: true
+
+- name: Apply demo Application (guestbook)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    src: "{{ role_path }}/files/application-guestbook.yaml"
+    apply: true
+    namespace: "{{ namespace }}"
+
+- name: Rollout restart ArgoCD components (kubectl)
+  ansible.builtin.command: >
+    kubectl --kubeconfig {{ kubeconfig }} -n {{ namespace }}
+    rollout restart deployment/{{ item }}
+  loop:
+    - argocd-server
+    - argocd-repo-server
+
+- name: Print access instructions (port-forward)
+  debug:
+    msg:
+      - "Run: kubectl -n {{ namespace }} port-forward svc/argocd-server 8080:80"
+      - "Open: http://localhost:8080"
+      - "Login: admin (password from env_secrets.yml: argocd_admin_password)"
+      - "Other users: demo-deployer / readonly-user (passwords from env_secrets.yml)"

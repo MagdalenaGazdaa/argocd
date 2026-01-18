@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: demo
+  namespace: {{ namespace }}
+spec:
+  description: "Demo project with constrained permissions"
+  sourceRepos:
+    - "https://github.com/argoproj/argocd-example-apps"
+{% if argocd_repo_url is defined and (argocd_repo_url | length) > 0 %}
+    - "{{ argocd_repo_url }}"
+{% endif %}
+  destinations:
+    - namespace: demo
+      server: https://kubernetes.default.svc
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ConfigMap
