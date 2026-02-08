@@ -1,11 +1,11 @@
-- name: Ensure ArgoCD namespace exists
+- name: Create argocd namespace
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig }}"
     state: present
     kind: Namespace
     name: "{{ namespace }}"
 
-- name: Install ArgoCD (base manifests)
+- name: Install ArgoCD
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig }}"
     state: present
@@ -33,7 +33,7 @@
     - argocd-repo-server
     - argocd-server
 
-- name: Patch argocd-cm (merge only our keys)
+- name: Patch argocd-cm
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig }}"
     state: patched
@@ -50,7 +50,7 @@
         accounts.demo-deployer: "login"
         accounts.readonly-user: "login"
 
-- name: Patch argocd-rbac-cm (merge policies)
+- name: Patch argocd-rbac-cm
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig }}"
     state: patched
@@ -76,17 +76,7 @@
 
           g, demo-deployer, role:deployer
 
-# - name: Apply ArgoCD config (cm + rbac)
-#   kubernetes.core.k8s:
-#     kubeconfig: "{{ kubeconfig }}"
-#     state: present
-#     src: "{{ role_path }}/files/{{ item }}"
-#     apply: true
-#   loop:
-#     - argocd-cm.yaml
-#     - argocd-rbac-cm.yaml
-
-- name: Compute password mtime (UTC RFC3339)
+- name: Compute password mtime
   set_fact:
     argocd_password_mtime: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
 
@@ -96,7 +86,7 @@
     demo_deployer_password_bcrypt: "{{ (demo_deployer_password | string) | password_hash('bcrypt') }}"
     readonly_user_password_bcrypt: "{{ (readonly_user_password | string) | password_hash('bcrypt') }}"
 
-- name: Patch argocd-secret with passwords (admin + local users)
+- name: Patch argocd-secret with passwords
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig }}"
     state: present
@@ -119,7 +109,7 @@
     definition: "{{ lookup('template', role_path + '/files/appproject-demo.yaml.j2') | from_yaml }}"
     apply: true
 
-- name: Apply demo Application (guestbook)
+- name: Apply demo Application
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig }}"
     state: present
@@ -127,7 +117,7 @@
     apply: true
     namespace: "{{ namespace }}"
 
-- name: Rollout restart ArgoCD components (kubectl)
+- name: Rollout restart ArgoCD components
   ansible.builtin.command: >
     kubectl --kubeconfig {{ kubeconfig }} -n {{ namespace }}
     rollout restart deployment/{{ item }}
@@ -135,7 +125,7 @@
     - argocd-server
     - argocd-repo-server
 
-- name: Print access instructions (port-forward)
+- name: Print access instructions
   debug:
     msg:
       - "Run: kubectl -n {{ namespace }} port-forward svc/argocd-server 8080:80"
